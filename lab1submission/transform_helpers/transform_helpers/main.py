@@ -2,12 +2,16 @@ import rclpy
 from rclpy.node import Node
 # TODO: Import the message type that holds data describing robot joint angle states
 # this tutorial may have hints: https://docs.ros.org/en/rolling/Tutorials/Intermediate/URDF/Using-URDF-with-Robot-State-Publisher.html#publish-the-state
+from sensor_msgs.msg import JointState
 
 # TODO: Import the class that publishes coordinate frame transform information
 # this tutorial may have hints: https://docs.ros.org/en/rolling/Tutorials/Intermediate/Tf2/Writing-A-Tf2-Listener-Py.html
+from tf2_ros import TransformBroadcaster
 
 # TODO: Import the message type that expresses a transform from one coordinate frame to another
 # this same tutorial from earlier has hints: https://docs.ros.org/en/rolling/Tutorials/Intermediate/Tf2/Writing-A-Tf2-Listener-Py.html
+from geometry_msgs.msg import TransformStamped
+
 
 import numpy as np
 from numpy.typing import NDArray
@@ -40,8 +44,34 @@ def get_transform_n_to_n_minus_one(n: int, theta: float) -> NDArray:
     # TODO: implement this function
     # note that it may be helpful to refer to documentation on modified denavit hartenberg parameters:
     # https://en.wikipedia.org/wiki/Denavit%E2%80%93Hartenberg_parameters#Modified_DH_parameters
-    raise NotImplementedError
+    if n <= 0 or n > DH_PARAMS.shape[0]:
+        raise ValueError(f"Joint index {n} out of bounds for DH parameters of length {DH_PARAMS.shape[0]}.")
 
+    a, d, alpha, theta_offset = DH_PARAMS[n_minus_one]
+    theta_total = theta + theta_offset
+
+    cos_theta = np.cos(theta_total)
+    sin_theta = np.sin(theta_total)
+    cos_alpha = np.cos(alpha)
+    sin_alpha = np.sin(alpha)
+
+    transform_matrix[0, 0] = cos_theta
+    transform_matrix[0, 1] = -sin_theta
+    transform_matrix[0, 3] = a
+
+    transform_matrix[1, 0] = sin_theta * cos_alpha
+    transform_matrix[1, 1] = cos_theta * cos_alpha
+    transform_matrix[1, 2] = -sin_alpha
+    transform_matrix[1, 3] = -sin_alpha * d
+
+    transform_matrix[2, 0] = sin_theta * sin_alpha
+    transform_matrix[2, 1] = cos_theta * sin_alpha
+    transform_matrix[2, 2] = cos_alpha
+    transform_matrix[2, 3] = cos_alpha * d
+
+    transform_matrix[3, 3] = 1.0
+
+    return transform_matrix
 
 
 class ForwardKinematicCalculator(Node):
@@ -51,8 +81,13 @@ class ForwardKinematicCalculator(Node):
 
         # TODO: create a subscriber to joint states, can you find which topic
         # this publishes on by using ros2 topic list while running the example?
-        raise NotImplementedError
-        self.joint_sub  # prevent unused variable warning
+        # raise NotImplementedError
+        self.joint_sub = self.create_subscription(
+            JointState,
+            '/joint_states',
+            self.publish_transforms,
+            10,
+        )
 
         # Initialize the transform broadcaster
         self.tf_broadcaster = TransformBroadcaster(self)
@@ -61,7 +96,7 @@ class ForwardKinematicCalculator(Node):
         self.prefix = "my_robot/"
 
     def publish_transforms(self, msg: JointState):
-
+        # print(f"\n\nmsg: {msg}")
 
         self.get_logger().debug(str(msg))
 
@@ -98,7 +133,17 @@ class ForwardKinematicCalculator(Node):
             # TODO: set the translation and rotation in the message we have created
             # you can check the documentation for the message type for ros2
             # to see what members it has
-            raise NotImplementedError
+            translation = transform[:3, 3]
+            t.transform.translation.x = float(translation[0])
+            t.transform.translation.y = float(translation[1])
+            t.transform.translation.z = float(translation[2])
+
+            t.transform.rotation.x = float(quat.x)
+            t.transform.rotation.y = float(quat.y)
+            t.transform.rotation.z = float(quat.z)
+            t.transform.rotation.w = float(quat.w)
+
+            # print(f"t[{frame_id}]: {t}")
 
             self.tf_broadcaster.sendTransform(t)
     
@@ -110,6 +155,9 @@ def main(args=None):
 
     # TODO: initialize our class and start it spinning
     # this example may be helpful: https://docs.ros.org/en/humble/Tutorials/Beginner-Client-Libraries/Writing-A-Simple-Py-Publisher-And-Subscriber.html#write-the-subscriber-node
+    fk_calculator = ForwardKinematicCalculator()
+    rclpy.spin(fk_calculator)
+
 
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
